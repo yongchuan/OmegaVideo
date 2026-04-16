@@ -205,6 +205,7 @@ def euler_maruyama_sampler_path_drop(
     t_steps = torch.cat([t_steps, torch.tensor([0.], dtype=torch.float64)])
 
     if args is not None and getattr(args, "time_shifting", False):
+        #print("-------------->:time_shifting")
         shift_dim = latents.shape[1] * latents.shape[2] * latents.shape[3] * latents.shape[4]
         shift_base = getattr(args, "shift_base", 4096)
         t_steps = apply_time_shift(t_steps, shift_dim, shift_base)

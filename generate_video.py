@@ -266,10 +266,10 @@ def main(args):
     vae = AutoencoderKLLTXVideo.from_pretrained("/root/gpufree-data/models/ltx_vae/").to(device).eval()
     scaling_factor = 0.41407
 
-    # latent_mean, latent_std = get_latent_stats("dataset/vae-in/")
-    # # move to device
-    # latent_mean = latent_mean.clone().detach().to(device)
-    # latent_std = latent_std.clone().detach().to(device)
+    latent_mean, latent_std = get_latent_stats("/root/gpufree-data/OmegaDiT-master/videos_test/video_latents/")
+    # move to device
+    latent_mean = latent_mean.clone().detach().to(device)
+    latent_std = latent_std.clone().detach().to(device)
 
     # Create folder to save samples:
     model_string_name = args.model.replace("/", "-")
@@ -330,10 +330,10 @@ def main(args):
         total = 0
 
         labels = [None] * n
-        labels[0] = "A cat holding a sign that says hello world"
-        labels[1] = "a vibrant anime mountain lands"
-        labels[2] = "a highly detailed anime landscape,big tree on the water, epic sky,golden grass,detailed."
-        labels[3] = "a woman"
+        labels[0] = "a girl"
+        labels[1] = "The video features a man with a beard and short hair, wearing a brown shirt. "
+        labels[2] = "a woman with short brown hair is seen sitting in the backseat of a car. "
+        labels[3] = "The video features a young woman with dark hair and red lipstick, looking directly at the camera."
 
         y_null = model.y_embedder.y_embedding[None].repeat(n, 1, 1)[:, None]
         y_null = y_null.reshape(n, 77, 768)
@@ -376,8 +376,8 @@ def main(args):
                 ):
                     # For invae, apply 0.3099 scaling factor
                     # samples = vae.decode(samples / scaling_factor).sample
-                    # samples = (samples * latent_std) + latent_mean
-                    latent = (samples / scaling_factor)
+                    latent = (samples * latent_std) + latent_mean
+                    #latent = (samples / scaling_factor)
                     reconstructed = vae.decode(latent).sample
 	
             original_shape = (17, 352, 640)

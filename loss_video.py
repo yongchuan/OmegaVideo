@@ -14,6 +14,18 @@ def sum_flat(x):
     """
     return torch.sum(x, dim=list(range(1, len(x.size()))))
 
+def temporal_diff_loss(pred, target, loss_type="l1"):
+    # pred/target: [B, C, T, H, W]
+    pred_dt = pred[:, :, 1:] - pred[:, :, :-1]
+    target_dt = target[:, :, 1:] - target[:, :, :-1]
+
+    if loss_type == "l1":
+        return (pred_dt - target_dt).abs().mean()
+    elif loss_type == "l2":
+        return ((pred_dt - target_dt) ** 2).mean()
+    else:
+        raise ValueError(f"Unknown loss_type: {loss_type}")
+
 class SILoss:
     def __init__(
             self,
@@ -94,16 +106,18 @@ class SILoss:
         #denoising_loss
         denoising_loss = mean_flat((model_output - model_target) ** 2)
 
-        #cfm_target = torch.roll(model_target, shifts=1, dims=0)
-        #if self.cfm_weighting == "uniform":
-            #cfm_loss = -((model_output - cfm_target) ** 2).mean()
-        #elif self.cfm_weighting == "linear":
-            #cfm_loss = -(((model_output - cfm_target) ** 2) * time_input).mean()
+        temp_loss = temporal_diff_loss(model_output, model_target, loss_type="l2")
 
-        loss_mean = denoising_loss.mean()
-        #cfm_loss_mean = cfm_loss.mean() * 0.05
-        print("loss_mean:", loss_mean)
-        #print("cfm_loss_mean:", cfm_loss_mean)
-        return denoising_loss, time_input, noises
+        cfm_target = torch.roll(model_target, shifts=1, dims=0)
+        if self.cfm_weighting == "uniform":
+            cfm_loss = -((model_output - cfm_target) ** 2).mean()
+        elif self.cfm_weighting == "linear":
+            cfm_loss = -(((model_output - cfm_target) ** 2) * time_input).mean()
+
+        cfm_loss_mean = cfm_loss.mean() * 0.05
+        print("loss_mean:", denoising_loss.mean())
+        print("temp_loss:", temp_loss.mean() * 0.05)
+        print("cfm_loss_mean:", cfm_loss_mean)
+        return denoising_loss, time_input, noises, temp_loss, cfm_loss
         #return denoising_loss, time_input, noises, cfm_loss
 

@@ -429,13 +429,14 @@ def main(args):
 
             with accelerator.accumulate(model):
                 model_kwargs = dict(y=labels)
-                x = x * scaling_factor
+                #x = x * scaling_factor
                 #loss1, time_input, noises, cfm_loss = loss_fn(model, x, model_kwargs, time_input=None, noises=None)
-                loss1, time_input, noises = loss_fn(model, x, model_kwargs, time_input=None, noises=None)
+                loss1, time_input, noises, temp_loss, cfm_loss = loss_fn(model, x, model_kwargs, time_input=None, noises=None)
                 loss_mean = loss1.mean()
-                #cfm_loss_mean = cfm_loss.mean() * args.cfm_coeff
+                temp_loss_mean = temp_loss.mean() * 0.05
+                cfm_loss_mean = cfm_loss.mean() * args.cfm_coeff
                 #loss = loss_mean + cfm_loss_mean
-                loss = loss_mean
+                loss = loss_mean + temp_loss_mean + cfm_loss_mean
                 ## optimization
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:

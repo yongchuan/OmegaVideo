@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 
 class VideoLatentDataset(Dataset):
@@ -67,6 +68,9 @@ class VideoLatentDataset(Dataset):
         self.sample_ids = sorted(self.feature_by_id.keys())
         caption_map = self._load_caption_map(label_file)
         self.labels = [caption_map[sample_id] for sample_id in self.sample_ids]
+        
+        # if latent_norm:
+        self._latent_mean, self._latent_std = self.get_latent_stats()
 
     def _collect_npy_files(self, root_dir: str) -> List[str]:
         files = []
@@ -124,6 +128,33 @@ class VideoLatentDataset(Dataset):
             raise ValueError(f"Expected latent array with 4 dims, got {latent.shape} from {path}")
         return torch.from_numpy(latent)
 
+    def compute_latent_stats(self):
+        num_samples = min(10000, 10001)
+        random_indices = np.random.choice(len(self.sample_ids), num_samples, replace=False)
+        latents = []
+        for idx in tqdm(random_indices):
+            sample_id = self.sample_ids[idx]
+            feature_fname = self.feature_by_id[sample_id]
+            features = self._load_latent(os.path.join(self.features_dir, feature_fname))
+            features = features.unsqueeze(0)
+            #features = torch.from_numpy(features)
+            latents.append(features)
+        latents = torch.cat(latents, dim=0)
+        mean = latents.mean(dim=[0, 2, 3, 4], keepdim=True)
+        std = latents.std(dim=[0, 2, 3, 4], keepdim=True)
+        latent_stats = {'mean': mean.squeeze(0), 'std': std.squeeze(0)}
+        print(latent_stats)
+        return latent_stats
+    
+    def get_latent_stats(self):
+        latent_stats_cache_file = os.path.join(self.data_dir, "latents_stats.pt")
+        if not os.path.exists(latent_stats_cache_file):
+            latent_stats = self.compute_latent_stats()
+            torch.save(latent_stats, latent_stats_cache_file)
+        else:
+            latent_stats = torch.load(latent_stats_cache_file)
+        return latent_stats['mean'], latent_stats['std']
+
     def __getitem__(self, idx: int):
         sample_id = self.sample_ids[idx]
         video_fname = self.video_by_id[sample_id]
@@ -131,6 +162,7 @@ class VideoLatentDataset(Dataset):
 
         video = self._load_video(os.path.join(self.videos_dir, video_fname))
         latents = self._load_latent(os.path.join(self.features_dir, feature_fname))
+        latents = (latents - self._latent_mean) / self._latent_std
         label = self.labels[idx]
         return video, latents, label
 
