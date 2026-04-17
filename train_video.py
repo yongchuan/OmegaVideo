@@ -192,7 +192,7 @@ def main(args):
             videos_subdir=args.videos_subdir,
             latents_subdir=args.latents_subdir,
         )
-        sample_video, sample_latent, _ = train_dataset[0]
+        sample_latent, _ = train_dataset[0]
         if sample_latent.ndim != 4:
             raise ValueError(
                 f"Video latents must have shape [C, T, H, W], got {tuple(sample_latent.shape)}"
@@ -200,11 +200,9 @@ def main(args):
         video_latent_shape = tuple(int(dim) for dim in sample_latent.shape)
         if accelerator.is_main_process:
             logger.info(
-                "Using VideoLatentDataset from %s/ and %s/ with latent shape %s and raw video shape %s",
-                args.videos_subdir,
+                "Using VideoLatentDataset from %s/ with latent shape %s",
                 args.latents_subdir,
                 video_latent_shape,
-                tuple(int(dim) for dim in sample_video.shape),
             )
             logger.info(f"Using video caption labels from: {args.label_file}")
 
@@ -408,10 +406,12 @@ def main(args):
         running_loss = 0
         log_steps = 0
         grad_norm = torch.tensor(0.0, device=device)
-        for raw_image, x, y in train_dataloader:
+        for batch in train_dataloader:
             if args.use_video_dataset:
+                x, y = batch
                 x = x.to(device)
             else:
+                raw_image, x, y = batch
                 raw_image = raw_image.to(device)
                 x = x.squeeze(dim=1).to(device)
             
@@ -539,7 +539,7 @@ def parse_args(input_args=None):
     parser.add_argument("--use-video-dataset", action="store_true", help="Use VideoLatentDataset for caption-conditioned video training")
     parser.add_argument("--label-file", type=str, default=None, help="Path to JSON caption label file")
     parser.add_argument("--clip-model-id", type=str, default="AI-ModelScope/CLIP-GmP-ViT-L-14", help="CLIP model ID for text encoding")
-    parser.add_argument("--videos-subdir", type=str, default="videos", help="Subdirectory containing preprocessed raw video clips")
+    parser.add_argument("--videos-subdir", type=str, default="videos", help="Legacy argument. Raw preprocessed videos are no longer required.")
     parser.add_argument("--latents-subdir", type=str, default="vae-in", help="Subdirectory containing video latent .npy files")
 
     # precision
@@ -597,5 +597,4 @@ if __name__ == "__main__":
     args = parse_args()
     
     main(args)
-
 

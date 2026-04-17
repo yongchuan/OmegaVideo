@@ -217,16 +217,41 @@ def load_video(video_path: Path, fallback_fps: float) -> Tuple[torch.Tensor, flo
     ) from last_error
 
 
-def resize_video(video: torch.Tensor, target_height: int, target_width: int) -> torch.Tensor:
+def resize_video(video: torch.Tensor, target_height: int, target_width: int) -> Tuple[torch.Tensor, Dict[str, object]]:
+    _, frame_count, source_height, source_width = video.shape
+    if source_height <= 0 or source_width <= 0:
+        raise ValueError(f"Invalid source video shape: {tuple(video.shape)}")
+
+    # Preserve aspect ratio by scaling until the shorter side covers the target,
+    # then center-crop to the requested spatial resolution.
+    scale = max(target_height / float(source_height), target_width / float(source_width))
+    resized_height = max(target_height, int(round(source_height * scale)))
+    resized_width = max(target_width, int(round(source_width * scale)))
+
     frames = video.permute(1, 0, 2, 3).float()
     frames = F.interpolate(
         frames,
-        size=(target_height, target_width),
+        size=(resized_height, resized_width),
         mode="bilinear",
         align_corners=False,
         antialias=True,
     )
-    return frames.permute(1, 0, 2, 3).contiguous()
+
+    crop_top = max(0, (resized_height - target_height) // 2)
+    crop_left = max(0, (resized_width - target_width) // 2)
+    frames = frames[:, :, crop_top:crop_top + target_height, crop_left:crop_left + target_width]
+    if frames.shape[-2:] != (target_height, target_width):
+        raise ValueError(
+            f"Center crop produced unexpected shape {tuple(frames.shape)} for target "
+            f"({target_height}, {target_width})"
+        )
+
+    metadata = {
+        "resized_before_crop_shape": [int(video.shape[0]), int(frame_count), resized_height, resized_width],
+        "crop_top": crop_top,
+        "crop_left": crop_left,
+    }
+    return frames.permute(1, 0, 2, 3).contiguous(), metadata
 
 
 def pad_video_for_vae(video: torch.Tensor) -> Tuple[torch.Tensor, Tuple[int, int, int]]:
@@ -248,7 +273,7 @@ def preprocess_video(
     target_height: int,
     target_width: int,
     max_frames: Optional[int],
-) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, object]]:
+) -> Tuple[torch.Tensor, Dict[str, object]]:
     original_shape = list(video.shape)
     if max_frames is not None:
         if max_frames <= 0:
@@ -257,7 +282,7 @@ def preprocess_video(
         if video.shape[1] == 0:
             raise ValueError("Input video has no frames after applying --max-frames.")
 
-    resized = resize_video(video, target_height=target_height, target_width=target_width)
+    resized, resize_metadata = resize_video(video, target_height=target_height, target_width=target_width)
     processed_uint8 = resized.clamp(0, 255).round().to(torch.uint8)
     normalized = processed_uint8.float().div(127.5).sub(1.0)
     padded, crop_shape = pad_video_for_vae(normalized)
@@ -267,8 +292,9 @@ def preprocess_video(
         "processed_shape": list(processed_uint8.shape),
         "vae_input_shape": list(padded.shape),
         "crop_shape": list(crop_shape),
+        **resize_metadata,
     }
-    return processed_uint8, padded, metadata
+    return padded, metadata
 
 
 def save_numpy(path: Path, array: np.ndarray) -> None:
@@ -279,17 +305,13 @@ def save_numpy(path: Path, array: np.ndarray) -> None:
 
 def encode_and_save_video(
     vae,
-    processed_video: torch.Tensor,
     vae_input: torch.Tensor,
     device: str,
     dtype: torch.dtype,
     output_relative_npy: Path,
-    videos_dir: Path,
     latents_dir: Path,
 ) -> None:
-    #print("vae_input:", vae_input.shape)
     vae_video = vae_input.unsqueeze(0)
-    #print("vae_video:", vae_video.shape)
     vae_video = vae_video.to(device=device, dtype=dtype)
 
     with torch.inference_mode():
@@ -298,18 +320,13 @@ def encode_and_save_video(
                     "cuda",
                     enabled=(True),
             ):
-                print("vae_video:", vae_video.shape)
                 latent = vae.encode(vae_video).latent_dist.sample()
-                print("latent:", latent.shape)
-                processed_video_array = processed_video.cpu().numpy()
                 latent_array = latent.detach().cpu().numpy()
-                save_numpy(videos_dir / output_relative_npy, processed_video_array)
                 save_numpy(latents_dir / output_relative_npy, latent_array)
 
 
 def main() -> None:
     args = parse_args()
-    device="cuda"
     if not args.device.startswith("cuda"):
         raise ValueError("VideoVAE preprocessing requires a CUDA device.")
     if not torch.cuda.is_available():
@@ -327,32 +344,27 @@ def main() -> None:
     if not video_files:
         raise FileNotFoundError(f"No supported video files found under: {source_dir}")
 
-    videos_dir = dest_dir / "videos"
     latents_dir = dest_dir / "vae-in"
-    videos_dir.mkdir(parents=True, exist_ok=True)
     latents_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = resolve_dtype(args.dtype)
-    vae = AutoencoderKLLTXVideo.from_pretrained("/root/gpufree-data/models/ltx_vae/").to(device).eval()
+    vae = AutoencoderKLLTXVideo.from_pretrained(str(vae_path)).to(device=args.device, dtype=dtype).eval()
 
     manifest = []
 
     for video_path in tqdm(video_files, desc="Encoding videos with VideoVAE"):
         relative_path = video_path.relative_to(source_dir)
         relative_npy = Path(relative_path).with_suffix(".npy")
-        raw_output_path = videos_dir / relative_npy
         latent_output_path = latents_dir / relative_npy
 
         if (
             not args.overwrite
-            and raw_output_path.exists()
             and latent_output_path.exists()
         ):
             manifest.append(
                 {
                     "id": relative_npy.with_suffix("").as_posix(),
                     "source": relative_path.as_posix(),
-                    "processed_video": relative_npy.as_posix(),
                     "latent": relative_npy.as_posix(),
                     "skipped": True,
                 }
@@ -360,7 +372,7 @@ def main() -> None:
             continue
 
         video, fps = load_video(video_path, fallback_fps=args.fallback_fps)
-        processed_video, vae_input, metadata = preprocess_video(
+        vae_input, metadata = preprocess_video(
             video,
             target_height=args.target_height,
             target_width=args.target_width,
@@ -368,12 +380,10 @@ def main() -> None:
         )
         encode_and_save_video(
             vae=vae,
-            processed_video=processed_video,
             vae_input=vae_input,
             device=args.device,
             dtype=dtype,
             output_relative_npy=relative_npy,
-            videos_dir=videos_dir,
             latents_dir=latents_dir,
         )
 
@@ -381,7 +391,6 @@ def main() -> None:
             {
                 "id": relative_npy.with_suffix("").as_posix(),
                 "source": relative_path.as_posix(),
-                "processed_video": relative_npy.as_posix(),
                 "latent": relative_npy.as_posix(),
                 "fps": fps,
                 **metadata,
@@ -401,4 +410,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
