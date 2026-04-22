@@ -431,20 +431,20 @@ class SiTBlock(nn.Module):
         if "fused_attn" in block_kwargs.keys():
             self.attn.fused_attn = block_kwargs["fused_attn"]
         self.norm2 = nn.RMSNorm(hidden_size, elementwise_affine=True, eps=1e-6)
-        # mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
         # approx_gelu = lambda: nn.GELU(approximate="tanh")
         # self.mlp = Mlp(
         #     in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0
         # )
-        # self.mlp = SwiGLUFFN(hidden_size, int(2 / 3 * mlp_hidden_dim))
-        mlp_acts = ("silu", "silu", None)
-        self.mlp = GLUMBConv(
-            in_features=hidden_size,
-            hidden_features=int(hidden_size * mlp_ratio),
-            use_bias=(True, True, False),
-            norm=(None, None, None),
-            act=mlp_acts,
-        )
+        self.mlp = SwiGLUFFN(hidden_size, int(2 / 3 * mlp_hidden_dim))
+        #mlp_acts = ("silu", "silu", None)
+        #self.mlp = GLUMBConv(
+        #    in_features=hidden_size,
+        #    hidden_features=int(hidden_size * mlp_ratio),
+        #    use_bias=(True, True, False),
+        #    norm=(None, None, None),
+        #    act=mlp_acts,
+        #)
 
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
@@ -471,16 +471,16 @@ class SiTBlock(nn.Module):
             attnInput, self.TT
         )
 
-        x_m = modulate(self.norm2(x), shift_mlp, scale_mlp)
-        x_m_txt = x_m[:, :TT, :]
-        x_m_img = rearrange(x_m[:, TT:, :], "B (T S) C -> (B T) S C", T=T, S=S)
-        x_mlp_img = self.mlp(x_m_img, H, W)
-        x_mlp_img = rearrange(x_mlp_img, "(B T) S C -> B (T S) C", T=T, S=S)
-        x_mlp = torch.cat([x_m_txt, x_mlp_img], dim=1)
-        x = x + gate_mlp.unsqueeze(1) * x_mlp
-        # x = x + gate_mlp.unsqueeze(1) * self.mlp(
-        #     modulate(self.norm2(x), shift_mlp, scale_mlp)
-        # )
+        #x_m = modulate(self.norm2(x), shift_mlp, scale_mlp)
+        #x_m_txt = x_m[:, :TT, :]
+        #x_m_img = rearrange(x_m[:, TT:, :], "B (T S) C -> (B T) S C", T=T, S=S)
+        #x_mlp_img = self.mlp(x_m_img, H, W)
+        #x_mlp_img = rearrange(x_mlp_img, "(B T) S C -> B (T S) C", T=T, S=S)
+        #x_mlp = torch.cat([x_m_txt, x_mlp_img], dim=1)
+        #x = x + gate_mlp.unsqueeze(1) * x_mlp
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(
+             modulate(self.norm2(x), shift_mlp, scale_mlp)
+        )
         return x
 
 

@@ -266,7 +266,7 @@ def main(args):
     vae = AutoencoderKLLTXVideo.from_pretrained("/root/gpufree-data/models/ltx_vae/").to(device).eval()
     scaling_factor = 0.41407
 
-    latent_mean, latent_std = get_latent_stats("/root/gpufree-data/OmegaDiT-master/videos_test/video_latents/")
+    latent_mean, latent_std = get_latent_stats("/root/gpufree-data/OmegaDiT-master/vid_latent/")
     # move to device
     latent_mean = latent_mean.clone().detach().to(device)
     latent_std = latent_std.clone().detach().to(device)
@@ -330,10 +330,10 @@ def main(args):
         total = 0
 
         labels = [None] * n
-        labels[0] = "a girl"
-        labels[1] = "The video features a man with a beard and short hair, wearing a brown shirt. "
-        labels[2] = "a woman with short brown hair is seen sitting in the backseat of a car. "
-        labels[3] = "The video features a young woman with dark hair and red lipstick, looking directly at the camera."
+        labels[0] = "little Krishna says, green background"
+        labels[1] = "Little Krishna speaking, solid green background."
+        labels[2] = "A charming cartoon-style village nestled in rolling green hills, dotted with bright colorful cottages connected by winding pathways, ultra-detailed 8K, wideshot 16:9."
+        labels[3] = "An Afrocentric boy in his room, sitting on a rug, moving his body while playing with a toy plane — leaning, turning, and gesturing. Motion level: 4."
 
         y_null = model.y_embedder.y_embedding[None].repeat(n, 1, 1)[:, None]
         y_null = y_null.reshape(n, 77, 768)
